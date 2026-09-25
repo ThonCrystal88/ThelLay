@@ -10,7 +10,6 @@
   };
   const number = (value) => Number(String(value ?? '0').replace(/,/g, '')) || 0;
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] || char));
-  const id = () => window.crypto?.randomUUID ? window.crypto.randomUUID() : `loan-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const money = (value) => `${Math.round(number(value)).toLocaleString('en-US')} MMK`;
 
   const ensureLoanCategory = (select) => {
@@ -64,6 +63,7 @@
     const isLoan = mode === 'loan';
     const isRepayment = mode === 'repayment';
     repaymentFields?.classList.toggle('hidden', !isRepayment);
+    amount?.closest('label')?.classList.toggle('hidden-field', isRepayment);
     if (isLoan) {
       type.value = 'income';
       type.disabled = true;
@@ -98,11 +98,13 @@
 
   const enhanceModal = (modal) => {
     if (modal.dataset.loanEnhanced === 'true') return;
+    const tabs = modal.querySelector('.transaction-tabs');
+    if (!tabs) return;
+    if (tabs.querySelector('[data-mode="loan"]') || tabs.querySelector('[data-mode="repayment"]')) return;
     modal.dataset.loanEnhanced = 'true';
     addStyles();
-    const tabs = modal.querySelector('.transaction-tabs');
     const standardTab = tabs?.querySelector('[data-mode="standard"]');
-    if (!tabs || !standardTab) return;
+    if (!standardTab) return;
     const loanTab = document.createElement('button');
     loanTab.type = 'button';
     loanTab.className = 'transaction-tab loan-tab';
@@ -138,9 +140,9 @@
     const date = form.querySelector('input[name="date"]')?.value || new Date().toISOString().slice(0, 10);
     if (!amount || amount <= 0) return 'Enter a valid loan amount greater than zero.';
     if (!note) return 'Enter the loan name in the Note field.';
-    const loanId = id();
+    const loanId = window.crypto?.randomUUID ? window.crypto.randomUUID() : `loan-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     state.loans.push({ id: loanId, name: note, principal: amount, paid: 0, balance: amount, remaining: amount, date, note, createdAt: new Date().toISOString() });
-    state.transactions.push({ id: id(), type: 'income', category: 'Loan', amount, date, note, loanId, loanType: 'loan', createdAt: new Date().toISOString() });
+    state.transactions.push({ id: window.crypto?.randomUUID ? window.crypto.randomUUID() : `tx-${Date.now()}`, type: 'income', category: 'Loan', amount, date, note, loanId, loanType: 'loan', createdAt: new Date().toISOString() });
     saveState(state);
     window.dispatchEvent(new CustomEvent('moneyflow:state-updated'));
     return '';
@@ -161,7 +163,7 @@
     loan.paid = number(loan.paid) + amount;
     loan.balance = Math.max(0, number(loan.balance ?? loan.remaining) - amount);
     loan.remaining = loan.balance;
-    state.transactions.push({ id: id(), type: 'expense', category: 'Loan repayment', amount, date, note, loanId, loanType: 'payback', createdAt: new Date().toISOString() });
+    state.transactions.push({ id: window.crypto?.randomUUID ? window.crypto.randomUUID() : `tx-${Date.now()}`, type: 'expense', category: 'Loan repayment', amount, date, note, loanId, loanType: 'payback', createdAt: new Date().toISOString() });
     saveState(state);
     window.dispatchEvent(new CustomEvent('moneyflow:state-updated'));
     return '';
