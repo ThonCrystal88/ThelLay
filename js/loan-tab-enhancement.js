@@ -1,182 +1,314 @@
-(() => {
-  'use strict';
+/* Global theme fix: this stylesheet is loaded after base styles so every component uses the same light/dark design tokens. */
+:root {
+  color-scheme: light;
+  --bg: #f4f7fb;
+  --surface: rgba(255,255,255,0.92);
+  --surface-solid: #ffffff;
+  --text: #172033;
+  --muted: #718096;
+  --line: rgba(100,116,139,0.28);
+  --blue: #4f8cff;
+  --cyan: #0891b2;
+  --violet: #7c3aed;
+  --green: #059669;
+  --yellow: #b7791f;
+  --red: #dc2626;
+  --shadow: 0 18px 50px rgba(15,23,42,0.10);
+}
 
-  const STORAGE_KEY = 'moneyflow-v3';
-  const readState = () => {
-    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch (_) { return {}; }
-  };
-  const saveState = (state) => {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (_) {}
-  };
-  const number = (value) => Number(String(value ?? '0').replace(/,/g, '')) || 0;
-  const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] || char));
-  const makeId = (prefix) => window.crypto?.randomUUID?.() || `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const money = (value) => `${Math.round(number(value)).toLocaleString('en-US')} MMK`;
+body,
+body:not(.dark) {
+  color-scheme: light;
+  color: var(--text);
+  background: radial-gradient(circle at 10% -10%, rgba(79,140,255,0.12), transparent 32%), radial-gradient(circle at 100% 0, rgba(139,92,246,0.10), transparent 30%), var(--bg);
+}
 
-  const closeModal = (modal) => {
-    if (!modal) return;
-    modal.classList.add('hidden');
-    document.body.classList.remove('modal-open');
-    document.activeElement?.blur?.();
-  };
+body.dark {
+  color-scheme: dark;
+  --bg: #070b16;
+  --surface: rgba(13,20,36,0.86);
+  --surface-solid: #0d1424;
+  --text: #f2f6ff;
+  --muted: #91a2bb;
+  --line: rgba(148,163,184,0.18);
+  --cyan: #22d3ee;
+  --green: #34d399;
+  --yellow: #fbbf24;
+  --red: #fb7185;
+  --shadow: 0 22px 70px rgba(0,0,0,0.34);
+  color: var(--text);
+  background: radial-gradient(circle at 10% -10%, rgba(79,140,255,0.16), transparent 32%), radial-gradient(circle at 100% 0, rgba(139,92,246,0.14), transparent 30%), var(--bg);
+}
 
-  const ensureLoanCategory = (select) => {
-    if (!select) return;
-    let option = [...select.options].find((item) => item.value.toLowerCase() === 'loan');
-    if (!option) {
-      option = document.createElement('option');
-      option.value = 'Loan';
-      option.textContent = 'Loan';
-      select.appendChild(option);
-    }
-    select.value = 'Loan';
-  };
+html, body { min-height: 100%; }
+body, button, input, select { font-family: inherit; }
 
-  const populateRepayments = (modal) => {
-    const select = modal.querySelector('select[name="loanId"]');
-    if (!select) return;
-    const loans = (readState().loans || []).filter((loan) => number(loan.balance ?? loan.remaining) > 0);
-    select.innerHTML = loans.length
-      ? loans.map((loan) => `<option value="${esc(loan.id)}">${esc(loan.name || 'Loan')} · ${money(loan.balance ?? loan.remaining)}</option>`).join('')
-      : '<option value="">No outstanding loans</option>';
-    select.disabled = !loans.length;
-  };
+.panel, .stat-card, .transaction-modal, .settings-item, .loan-item, .budget-item, .quick-action {
+  background: var(--surface-solid);
+  color: var(--text);
+  border: 1px solid var(--line);
+}
 
-  const setMode = (modal, mode) => {
-    const form = modal.querySelector('#transactionForm');
-    if (!form) return;
-    modal.querySelectorAll('.transaction-tab').forEach((tab) => tab.classList.toggle('active', tab.dataset.mode === mode));
-    const type = form.querySelector('select[name="type"]');
-    const category = form.querySelector('select[name="category"]');
-    const amount = form.querySelector('input[name="amount"]');
-    const amountLabel = amount?.closest('label');
-    const repaymentFields = modal.querySelector('#repaymentFields');
-    const repaymentAmount = form.querySelector('input[name="repaymentAmount"]');
-    const loanSelect = form.querySelector('select[name="loanId"]');
-    const isLoan = mode === 'loan';
-    const isRepayment = mode === 'repayment';
+body.dark .panel,
+body.dark .stat-card,
+body.dark .transaction-modal,
+body.dark .settings-item,
+body.dark .loan-item,
+body.dark .budget-item,
+body.dark .quick-action {
+  background: rgba(13,20,36,0.88);
+}
 
-    amountLabel?.classList.toggle('hidden-field', isRepayment);
-    repaymentFields?.classList.toggle('hidden', !isRepayment);
-    amount.required = !isRepayment;
-    repaymentAmount.required = isRepayment;
-    loanSelect.required = isRepayment;
+body.modal-open { overflow: hidden; }
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 100;
+  display: grid; place-items: center;
+  width: 100vw; height: 100dvh; padding: clamp(12px, 4vw, 40px);
+  overflow-y: auto; background: rgba(2,6,23,.68); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+.modal-backdrop.hidden { display: none; }
+.transaction-modal {
+  width: min(680px,100%); max-height: min(90dvh,760px); overflow: auto; overscroll-behavior: contain;
+  padding: clamp(20px,4vw,32px); color: var(--text); background: var(--surface-solid);
+  border: 1px solid var(--line); border-radius: 24px; box-shadow: 0 26px 90px rgba(0,0,0,.38);
+}
+body.dark .transaction-modal { background: linear-gradient(145deg, rgba(19,30,52,.98), rgba(10,16,30,.98)); }
+.modal-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:20px; }
+.transaction-modal h2 { margin:4px 0 0; font-size: clamp(1.35rem, 4vw, 1.8rem); }
+.modal-close { display:grid; place-items:center; width:40px; height:40px; flex:0 0 auto; border:1px solid var(--line); border-radius:12px; background: rgba(148,163,184,.1); color: var(--text); font-size:1.5rem; cursor:pointer; }
+.transaction-tabs { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; padding:5px; margin-bottom:20px; border:1px solid var(--line); border-radius:15px; background: rgba(148,163,184,.08); }
+.transaction-tab { min-height:44px; border:1px solid transparent; border-radius:11px; background:transparent; color:var(--muted); font-weight:700; cursor:pointer; }
+.transaction-tab.active { color:#fff; background: linear-gradient(135deg, var(--blue), var(--violet)); box-shadow: 0 8px 18px rgba(79,140,255,.2); }
+.transaction-form-grid, .repayment-row { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.transaction-form-grid .full { grid-column:1/-1; }
+.transaction-modal label { display:grid; gap:7px; min-width:0; }
+.transaction-modal label > span { color: var(--muted); font-size:.86rem; font-weight:700; }
+.transaction-modal input, .transaction-modal select { width:100%; min-width:0; min-height:46px; padding:0 12px; border:1px solid var(--line); border-radius:12px; outline:none; background: var(--surface-solid); color: var(--text); }
+body.dark .transaction-modal input, body.dark .transaction-modal select { background: rgba(7,11,22,.72); }
+.transaction-modal input:focus, .transaction-modal select:focus, .transaction-tab:focus-visible, .modal-close:focus-visible { border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(34,211,238,.16); }
+.repayment-row.hidden { display:none; }
+.form-error { display:none; margin:0 0 16px; padding:12px 14px; border:1px solid rgba(251,113,133,.42); border-radius:12px; background: rgba(251,113,133,.1); color: var(--red); font-weight:600; line-height:1.4; }
+.form-error.visible { display:block; }
 
-    if (isLoan) {
-      type.value = 'income'; type.disabled = true;
-      ensureLoanCategory(category); category.disabled = true;
-      form.querySelector('input[name="note"]').placeholder = 'Loan name';
-    } else if (isRepayment) {
-      type.value = 'expense'; type.disabled = true;
-      category.value = 'Loan repayment'; category.disabled = true;
-      populateRepayments(modal);
-    } else {
-      type.disabled = false; category.disabled = false;
-      form.querySelector('input[name="note"]').placeholder = 'Optional note';
-    }
-  };
+.table-wrap { width:100%; max-width:100%; overflow-x:auto; overflow-y:hidden; -webkit-overflow-scrolling:touch; }
+.table-wrap table { width:100%; min-width:680px; border-collapse:collapse; }
+.table-wrap th, .table-wrap td { overflow-wrap:anywhere; }
 
-  const saveLoan = (form) => {
-    const state = readState();
-    state.transactions = Array.isArray(state.transactions) ? state.transactions : [];
-    state.loans = Array.isArray(state.loans) ? state.loans : [];
-    const amount = number(form.querySelector('input[name="amount"]')?.value);
-    const note = String(form.querySelector('input[name="note"]')?.value || '').trim();
-    if (!amount) return 'Enter a valid loan amount greater than zero.';
-    if (!note) return 'Enter the loan name in the Note field.';
-    const loanId = makeId('loan');
-    const date = form.querySelector('input[name="date"]')?.value || new Date().toISOString().slice(0, 10);
-    state.loans.push({ id: loanId, name: note, principal: amount, paid: 0, balance: amount, remaining: amount, date, note });
-    state.transactions.push({ id: makeId('tx'), type: 'income', category: 'Loan', amount, date, note, loanId, loanType: 'loan' });
-    saveState(state); window.dispatchEvent(new CustomEvent('moneyflow:state-updated')); return '';
-  };
+.budget-category-management-list { display:grid; gap:8px; margin-top:14px; }
+.budget-category-management-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border:1px solid var(--line); border-radius:12px; background: rgba(79,140,255,.04); }
+.budget-category-management-meta { display:grid; gap:3px; min-width:0; }
+.budget-category-management-meta strong { overflow-wrap:anywhere; }
+.budget-category-management-meta small { color: var(--muted); }
+.budget-category-management-actions { display:flex; gap:6px; flex:0 0 auto; }
+.budget-category-management-actions button { min-height:32px; padding:6px 9px; border:1px solid var(--line); border-radius:9px; background: rgba(148,163,184,.08); color: var(--text); font-size:.75rem; }
+.budget-category-management-actions .delete { color: var(--red); }
+.budget-category-type { display:grid; gap:8px; margin-top:12px; }
+.budget-category-type select { min-height:42px; padding:0 12px; border:1px solid var(--line); border-radius:12px; background: var(--surface-solid); color: var(--text); }
 
-  const saveRepayment = (form) => {
-    const state = readState();
-    state.transactions = Array.isArray(state.transactions) ? state.transactions : [];
-    state.loans = Array.isArray(state.loans) ? state.loans : [];
-    const loanId = form.querySelector('select[name="loanId"]')?.value || '';
-    const amount = number(form.querySelector('input[name="repaymentAmount"]')?.value);
-    const loan = state.loans.find((item) => String(item.id) === String(loanId));
-    if (!loan || number(loan.balance ?? loan.remaining) <= 0) return 'Select an outstanding loan.';
-    if (!amount || amount > number(loan.balance ?? loan.remaining)) return 'Enter a valid repayment amount within the loan balance.';
-    const date = form.querySelector('input[name="date"]')?.value || new Date().toISOString().slice(0, 10);
-    const note = String(form.querySelector('input[name="note"]')?.value || '').trim();
-    loan.paid = number(loan.paid) + amount;
-    loan.balance = Math.max(0, number(loan.balance ?? loan.remaining) - amount);
-    loan.remaining = loan.balance;
-    state.transactions.push({ id: makeId('tx'), type: 'expense', category: 'Loan repayment', amount, date, note, loanId, loanType: 'payback' });
-    saveState(state); window.dispatchEvent(new CustomEvent('moneyflow:state-updated')); return '';
-  };
+.floating-add-transaction {
+  position: fixed; right: clamp(16px, 3vw, 32px); bottom: clamp(16px, 3vw, 32px); width: 64px; height: 64px; min-height: 64px; padding: 0;
+  border-radius: 50%; display: inline-grid; place-items: center; z-index: 90; background: linear-gradient(135deg, var(--blue), var(--violet)); color: white; border: none; box-shadow: 0 18px 40px rgba(79,140,255,0.35);
+}
+.floating-add-transaction span:first-child { width:auto; height:auto; background:transparent; font-size:2rem; line-height:1; }
+.floating-add-transaction span:last-child { display:none; }
+body.modal-open .floating-add-transaction { opacity:0; visibility:hidden; pointer-events:none; }
 
-  const repairModal = (modal) => {
-    if (!modal) return;
-    const tabs = modal.querySelector('.transaction-tabs');
-    if (!tabs) return;
-    if (!tabs.querySelector('[data-mode="loan"]')) {
-      const standard = tabs.querySelector('[data-mode="standard"]');
-      if (standard) {
-        const loan = document.createElement('button');
-        loan.type = 'button'; loan.className = 'transaction-tab loan-tab'; loan.dataset.mode = 'loan'; loan.textContent = 'Loan';
-        standard.insertAdjacentElement('afterend', loan);
-      }
-    }
-    if (!tabs.dataset.bound) {
-      tabs.dataset.bound = 'true';
-      tabs.addEventListener('click', (event) => {
-        const tab = event.target.closest('.transaction-tab');
-        if (!tab) return;
-        event.preventDefault(); event.stopImmediatePropagation(); setMode(modal, tab.dataset.mode);
-      }, true);
-    }
-    if (!modal.dataset.closeBound) {
-      modal.dataset.closeBound = 'true';
-      modal.querySelector('.modal-close')?.addEventListener('click', (event) => { event.preventDefault(); closeModal(modal); }, true);
-      modal.querySelector('[data-close-modal]')?.addEventListener('click', (event) => { event.preventDefault(); closeModal(modal); }, true);
-    }
-  };
+.topbar { position:relative; min-width:0; }
+.topbar-actions { margin-left:auto; min-width:0; display:flex; align-items:center; justify-content:flex-end; gap:12px; flex-wrap:nowrap; }
+.topbar-actions .month-picker { min-width:0; }
+.topbar-actions .month-picker select { max-width:180px; }
+.sync-status, #syncButton { flex:0 0 auto; white-space:nowrap; }
 
-  const addStyles = () => {
-    if (document.getElementById('mobile-transaction-fixes')) return;
-    const style = document.createElement('style');
-    style.id = 'mobile-transaction-fixes';
-    style.textContent = `
-      .transaction-tabs{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
-      .transaction-modal .hidden-field{display:none!important}
-      .transaction-modal{color:var(--text);background:var(--surface-solid);border-color:var(--line)}
-      body.dark .transaction-modal{background:linear-gradient(145deg,rgba(19,30,52,.98),rgba(10,16,30,.98))}
-      .floating-add-transaction{position:fixed!important;right:20px!important;bottom:20px!important;width:64px!important;height:64px!important;min-height:64px!important;padding:0!important;border-radius:50%!important;display:grid!important;place-items:center!important;z-index:90!important}
-      .floating-add-transaction span:last-child{display:none!important}
-      .floating-add-transaction span:first-child{font-size:2rem!important;background:transparent!important}
-      @media(max-width:560px){.transaction-tabs{grid-template-columns:1fr!important}.floating-add-transaction{right:16px!important;bottom:16px!important}}
-    `;
-    document.head.appendChild(style);
-  };
+@media (max-width:820px) {
+  .topbar { align-items:flex-start; flex-direction:column; gap:14px; }
+  .topbar-actions { width:100%; justify-content:flex-end; flex-wrap:wrap; }
+  .topbar-actions .month-picker { order:3; width:100%; }
+  .topbar-actions .month-picker select { flex:1; max-width:none; }
+}
+@media (max-width:560px) {
+  .transaction-form-grid, .repayment-row { grid-template-columns:1fr; gap:13px; }
+  .transaction-form-grid .full { grid-column:auto; }
+  .transaction-tabs { grid-template-columns:1fr; }
+  .transaction-modal { max-height: calc(100dvh - 24px); border-radius:18px; }
+  .topbar-actions { gap:8px; }
+  .sync-status { max-width: calc(100% - 80px); overflow:hidden; text-overflow:ellipsis; }
+  .floating-add-transaction { right: 16px; bottom: 16px; }
+}
+@media (prefers-reduced-motion: reduce) { .floating-add-transaction, .transaction-modal { transition:none; } }
 
-  const bind = () => {
-    addStyles();
-    const observer = new MutationObserver(() => repairModal(document.getElementById('transactionModal')));
-    observer.observe(document.body, { childList: true, subtree: true });
-    document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeModal(document.getElementById('transactionModal')); });
-    document.addEventListener('submit', (event) => {
-      const form = event.target.closest('#transactionForm');
-      const modal = form?.closest('#transactionModal');
-      const mode = modal?.querySelector('.transaction-tab.active')?.dataset.mode;
-      if (!form || !modal || !['loan', 'repayment'].includes(mode)) return;
-      event.preventDefault(); event.stopImmediatePropagation();
-      const errorBox = modal.querySelector('#transactionFormError');
-      const error = mode === 'loan' ? saveLoan(form) : saveRepayment(form);
-      if (error) { errorBox.textContent = error; errorBox.classList.add('visible'); return; }
-      closeModal(modal); window.location.reload();
-    }, true);
-    window.addEventListener('moneyflow:state-updated', () => {
-      const state = readState();
-      if (state.settings?.categoriesUserCleared && Array.isArray(state.categories) && state.categories.length) {
-        state.categories = []; saveState(state);
-      }
-    });
-    repairModal(document.getElementById('transactionModal'));
-  };
+/* Compatibility fix: prevent keyboard from auto-opening when modal opens on mobile */
+#transactionModal input[name="amount"], #transactionModal input[name="note"], #transactionModal input[name="date"], #transactionModal input[name="repaymentAmount"] {
+  font-size: 16px;
+}
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind, { once: true }); else bind();
-})();
+/* Ensure empty category states aren't auto-resurrected */
+#categoryList .empty-state {
+  color: var(--muted);
+}
+
+/* Force responsive transaction table to scroll horizontally rather than shrink */
+.table-wrap {
+  overflow-x: auto;
+  width: 100%;
+}
+.table-wrap table {
+  min-width: 720px;
+}
+
+/* no-op compatibility block to maintain theme styles in different browsers */
+body.dark .panel,
+body.dark .transaction-modal,
+body.dark .settings-item,
+body.dark .loan-item,
+body.dark .quick-action,
+body.dark .budget-bar-card {
+  background: rgba(13,20,36,0.9);
+}
+
+/* Fix modal close / visibility for popup under phone browser */
+.modal-backdrop.hidden { display: none !important; }
+.transaction-modal .hidden { display: none !important; }
+
+/* Remove built-in default sample category resurrection */
+.category-default-hidden {
+  display: none !important;
+}
+
+/* Keep Add Transaction features separated from Quick Entry */
+.quick-action, .quick-action-row, .secondary-btn, .danger-btn { vertical-align: middle; }
+
+/* Loan repayment tab should not show repayment amount in standard mode */
+#repaymentFields.hidden { display: none !important; }
+
+/* Disable keyboard autopopup from opening once modal is shown */
+body.modal-open * { -webkit-tap-highlight-color: transparent; }
+
+/* Transaction table responsiveness */
+.transaction-table-wrap { overflow-x: auto; }
+.transaction-table-wrap table { min-width: 720px; }
+
+/* Mobile friendly modal layout */
+@media (max-width: 560px) {
+  .modal-backdrop { padding: 12px; }
+  .transaction-modal { width: min(100%, 100%); }
+}
+
+/* Prevent default category list from reappearing when user removes categories */
+#categoryList .settings-item button[data-remove-category] {
+  cursor: pointer;
+}
+
+/* Theme-safe form controls */
+.transaction-modal input,
+.transaction-modal select,
+.transaction-modal button,
+.month-picker select,
+#budgetCategory,
+#categoryForm input,
+#categoryForm select {
+  font-size: 16px;
+}
+
+/* Fix category delete UI stuck */
+.budget-category-management-row .delete {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Loan repayment items should not appear in standard type selectors */
+select[name="type"] option[value="repayment"],
+select[name="category"] option[value="Loan repayment"]:not(:checked) {
+  display: none;
+}
+
+/* Fix hidden state resets */
+.repayment-row.hidden,
+.transaction-modal .hidden,
+#repaymentFields.hidden {
+  display: none !important;
+}
+
+/* keep bottom-right circular action from acting like text label */
+.floating-add-transaction {
+  text-indent: 0;
+  letter-spacing: 0;
+}
+
+/* ensure popup closes consistent on mobile Safari */
+.modal-close, [data-close-modal], .ghost-btn { -webkit-appearance: none; }
+
+/* fix modal on small screens with safe area */
+@supports (padding: max(0px)) {
+  .modal-backdrop { padding: max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-left)) max(12px, env(safe-area-inset-top)); }
+}
+
+/* keep transaction table always scrollable */
+#transactionTable td,
+#transactionTable th {
+  white-space: nowrap;
+}
+
+/* remove stale sample categories from default state */
+[data-remove-category], .delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Add transaction should act like single-purpose button */
+#floatingAddTransaction {
+  cursor: pointer;
+}
+
+/* Loan tab should be visible in modal */
+.transaction-tabs .transaction-tab[data-mode="loan"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* suppress keyboard auto-open in modal input fields */
+#transactionModal input {
+  -webkit-user-modify: read-write-plaintext-only;
+}
+
+/* App theme compatibility */
+@media (prefers-color-scheme: dark) {
+  body:not(.dark) {
+    background: radial-gradient(circle at 10% -10%, rgba(79,140,255,0.16), transparent 32%), radial-gradient(circle at 100% 0, rgba(139,92,246,0.14), transparent 30%), var(--bg);
+  }
+}
+
+/* Avoid hidden repayment row in standard entry */
+#repaymentFields {
+  display: none;
+}
+#repaymentFields:not(.hidden) {
+  display: grid;
+}
+
+/* Ensure proper amount field behavior */
+input[name="amount"], input[name="repaymentAmount"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+/* Date field compatibility */
+input[type="date"] {
+  color-scheme: light;
+}
+body.dark input[type="date"] {
+  color-scheme: dark;
+}
+
+/* minimum mobile safe layout */
+@media (max-width: 400px) {
+  .transaction-modal { padding: 16px; }
+  .modal-header { gap: 8px; }
+}
+
+/* table render state */
+#transactionTable td:last-child, #transactionTable th:last-child {
+  min-width: 80px;
+}
+
