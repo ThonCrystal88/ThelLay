@@ -47,7 +47,6 @@ body.dark {
     var(--bg);
 }
 
-/* Replace hard-coded translucent white surfaces throughout the app. */
 .panel,
 .sidebar,
 .topbar,
@@ -103,7 +102,6 @@ textarea::placeholder { color: var(--muted); }
 select option { color: var(--text); background: var(--surface-solid); }
 body.dark select option { color: #f2f6ff; background: #0d1424; }
 
-/* Dynamic controls also inherit the active theme. */
 button,
 .nav-item,
 .theme-button,
@@ -147,8 +145,68 @@ body.modal-open { overflow: hidden; }
 .transaction-form-grid .amount-field.hidden-field,
 .transaction-modal .amount-field-hidden { display: none !important; }
 
+/* Compact home summary on narrow screens without changing its data or behavior. */
 @media (max-width: 560px) {
+  #home .cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  #home .cards .stat-card {
+    min-height: 78px;
+    margin-bottom: 0;
+    padding: 12px;
+    border-radius: 14px;
+    gap: 8px;
+  }
+
+  #home .cards .stat-card small {
+    font-size: .68rem;
+    line-height: 1.2;
+  }
+
+  #home .cards .stat-card strong {
+    font-size: clamp(.9rem, 4.2vw, 1.18rem);
+    line-height: 1.15;
+    overflow-wrap: anywhere;
+  }
+
+  #home .panel:has(.daily-budget) {
+    margin-bottom: 10px;
+    padding: 12px;
+    border-radius: 14px;
+  }
+
+  #home .panel:has(.daily-budget) .section-head {
+    margin-bottom: 6px;
+  }
+
+  #home .panel:has(.daily-budget) .section-head h3 {
+    font-size: .95rem;
+  }
+
+  #home .daily-budget {
+    gap: 4px;
+    padding-top: 0;
+  }
+
+  #home .daily-budget strong {
+    font-size: clamp(1.25rem, 6vw, 1.7rem);
+  }
+
+  #home .daily-budget small {
+    font-size: .72rem;
+    line-height: 1.25;
+  }
+
   .transaction-tabs { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 360px) {
+  #home .cards { gap: 6px; }
+  #home .cards .stat-card { min-height: 70px; padding: 10px; }
+  #home .cards .stat-card strong { font-size: .86rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
