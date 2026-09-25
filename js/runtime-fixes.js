@@ -11,6 +11,14 @@
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (_) {}
   };
   const getSyncUrl = () => String(readState()?.settings?.syncUrl || '').trim();
+  const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] || char));
+  const number = (value) => Number(String(value ?? '0').replace(/,/g, '')) || 0;
+  const money = (value) => `${Math.round(number(value)).toLocaleString('en-US')} MMK`;
+  const dateText = (value) => {
+    if (!value) return '—';
+    const date = new Date(`${String(value).slice(0, 10)}T12:00:00`);
+    return Number.isNaN(date.getTime()) ? esc(value) : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  };
 
   const setStatus = (message, tone = 'idle') => {
     const node = document.getElementById('syncStatus');
@@ -22,6 +30,7 @@
     node.textContent = message; node.dataset.tone = tone; node.classList.add('on');
     clearTimeout(showToast.timer); showToast.timer = setTimeout(() => node.classList.remove('on'), 2600);
   };
+
   const ensureSyncUrlInput = () => {
     const existing = document.getElementById('syncUrl');
     if (existing) return existing;
@@ -43,6 +52,7 @@
       setStatus(state.settings.syncUrl ? 'Ready to sync' : 'Sync URL required', state.settings.syncUrl ? 'idle' : 'warning');
     });
   };
+
   const requestJson = async (url, options = {}) => {
     let response;
     try { response = await fetch(url, options); } catch (error) { throw new Error(`Network/CORS error: ${error.message || 'request blocked'}`); }
@@ -53,10 +63,16 @@
     return result.data || result;
   };
 
+  /* Preserve every row, including legacy rows that were saved without an id. */
   const mergeById = (local, remote) => {
     const merged = new Map();
-    (Array.isArray(remote) ? remote : []).forEach((row) => row?.id && merged.set(String(row.id), row));
-    (Array.isArray(local) ? local : []).forEach((row) => row?.id && merged.set(String(row.id), row));
+    const add = (row, source, index) => {
+      if (!row || typeof row !== 'object') return;
+      const key = row.id != null && String(row.id) ? String(row.id) : `${source}-${index}-${JSON.stringify(row)}`;
+      merged.set(key, { ...row, id: row.id || `${source}-${Date.now()}-${index}` });
+    };
+    (Array.isArray(remote) ? remote : []).forEach((row, index) => add(row, 'remote', index));
+    (Array.isArray(local) ? local : []).forEach((row, index) => add(row, 'local', index));
     return [...merged.values()];
   };
   const mergeCategories = (local, remote) => {
@@ -102,16 +118,13 @@
       syncedAt: new Date().toISOString()
     })
   });
-
   const syncToGoogleSheets = async (reason = 'manual') => {
     if (syncInFlight) { syncQueued = true; return false; }
     const url = getSyncUrl();
     if (!url) { setStatus('Sync URL required', 'warning'); if (reason === 'manual') showToast('Add your Google Apps Script URL in Settings.', 'error'); return false; }
     syncInFlight = true;
     try {
-      const localBefore = readState();
-      const remote = await pull(url, reason === 'manual' ? 'manual' : 'silent');
-      const merged = mergeData(localBefore, remote);
+      const merged = mergeData(readState(), await pull(url, reason === 'manual' ? 'manual' : 'silent'));
       applyState(merged);
       await push(url, merged);
       setStatus('Synced and loaded just now', 'success');
@@ -125,27 +138,42 @@
     }
   };
 
-  /* UI fixes: keep the modal passive on open, make repayment truly amount-free,
-     and make category deletion work for both legacy and enhanced settings lists. */
+  /* Always render the complete transaction array. This deliberately does not
+     filter by month, type, category, or pagination, so no transaction is lost. */
+  const renderAllTransactions = () => {
+    const tbody = document.getElementById('transactionTable');
+    if (!tbody) return;
+    const transactions = Array.isArray(readState().transactions) ? readState().transactions : [];
+    if (!transactions.length) {
+      tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state">No transactions yet.</div></td></tr>';
+      return;
+    }
+    tbody.innerHTML = transactions.map((tx, index) => {
+      const type = String(tx.type || 'expense').toLowerCase() === 'income' ? 'income' : 'expense';
+      const id = tx.id != null ? String(tx.id) : `legacy-${index}`;
+      return `<tr data-transaction-id="${esc(id)}">
+        <td>${dateText(tx.date)}</td>
+        <td><span class="pill ${type}">${esc(type)}</span></td>
+        <td>${esc(tx.category || 'General')}</td>
+        <td>${esc(money(tx.amount))}</td>
+        <td>${esc(tx.note || '—')}</td>
+        <td><button type="button" class="remove-btn" data-remove-tx="${esc(id)}">Delete</button></td>
+      </tr>`;
+    }).join('');
+  };
+
   const addUiFixes = () => {
     if (document.getElementById('runtime-ui-fixes')) return;
     const style = document.createElement('style');
     style.id = 'runtime-ui-fixes';
-    style.textContent = `
-      .table-wrap { width:100%; max-width:100%; overflow-x:auto; overflow-y:hidden; -webkit-overflow-scrolling:touch; }
-      .table-wrap table { min-width:720px; }
-      .transaction-tabs { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
-      .transaction-modal .amount-field-hidden { display:none !important; }
-      @media (max-width:560px) { .transaction-tabs { grid-template-columns:1fr; } }
-    `;
+    style.textContent = `.table-wrap{width:100%;max-width:100%;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}.table-wrap table{min-width:720px}.transaction-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.transaction-modal .amount-field-hidden{display:none!important}@media(max-width:560px){.transaction-tabs{grid-template-columns:1fr}}`;
     document.head.appendChild(style);
   };
   const updateModalUi = (modal) => {
     if (!modal) return;
     const repayment = modal.querySelector('.transaction-tab.active')?.dataset.mode === 'repayment';
     const amount = modal.querySelector('input[name="amount"]');
-    const label = amount?.closest('label');
-    label?.classList.toggle('amount-field-hidden', repayment);
+    amount?.closest('label')?.classList.toggle('amount-field-hidden', repayment);
     if (repayment) { amount?.removeAttribute('required'); amount?.blur(); }
   };
   const repairModal = () => {
@@ -156,7 +184,6 @@
       modal.dataset.uiFixBound = 'true';
       modal.addEventListener('click', () => setTimeout(() => { updateModalUi(modal); document.activeElement?.blur?.(); }, 0), true);
     }
-    if (!modal.classList.contains('hidden')) setTimeout(() => document.activeElement?.blur?.(), 0);
   };
   const repairCategoryDelete = (event) => {
     const button = event.target.closest('[data-bcm-delete-category], [data-remove-category]');
@@ -165,25 +192,21 @@
     const key = button.dataset.bcmDeleteCategory || button.dataset.removeCategory;
     const state = readState();
     state.categories = (Array.isArray(state.categories) ? state.categories : []).filter((cat) => String(cat.id) !== String(key));
-    saveState(state);
-    window.dispatchEvent(new CustomEvent('moneyflow:state-updated'));
-    showToast('Category removed.');
+    saveState(state); window.dispatchEvent(new CustomEvent('moneyflow:state-updated')); showToast('Category removed.');
   };
 
   const bind = () => {
     addUiFixes(); wireSyncUrl();
     document.getElementById('syncButton')?.addEventListener('click', () => syncToGoogleSheets('manual'));
-    document.addEventListener('submit', (event) => {
-      if (!event.target.closest('form')) return;
-      const url = getSyncUrl();
-      if (url) setTimeout(() => syncToGoogleSheets('save'), 250);
-    }, true);
+    document.addEventListener('submit', (event) => { if (event.target.closest('form') && getSyncUrl()) setTimeout(() => syncToGoogleSheets('save'), 250); }, true);
     document.addEventListener('click', repairCategoryDelete, true);
-    const observer = new MutationObserver(repairModal);
+    const observer = new MutationObserver(() => { repairModal(); renderAllTransactions(); });
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    window.addEventListener('moneyflow:state-updated', renderAllTransactions);
     window.syncToGoogleSheets = syncToGoogleSheets;
     window.pullFromGoogleSheets = () => { const url = getSyncUrl(); return url ? pull(url, 'manual') : false; };
-    const url = getSyncUrl(); setStatus(url ? 'Ready to sync' : 'Sync URL required', url ? 'idle' : 'warning');
+    setStatus(getSyncUrl() ? 'Ready to sync' : 'Sync URL required', getSyncUrl() ? 'idle' : 'warning');
+    renderAllTransactions();
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind, { once: true }); else bind();
 })();
