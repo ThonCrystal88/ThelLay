@@ -43,7 +43,9 @@
   const safeNumber = (value) => Number(String(value ?? '0').replace(/,/g, '')) || 0;
   const money = (value) => `${Math.round(safeNumber(value)).toLocaleString('en-US')} MMK`;
   const fmtDate = (value) => {
-    if (!value) return ''; const d = new Date(value + 'T12:00:00'); return Number.isNaN(d.getTime()) ? value : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    if (!value) return '';
+    const d = new Date(value + 'T12:00:00');
+    return Number.isNaN(d.getTime()) ? value : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   };
   const monthStamp = (date = new Date()) => date.toISOString().slice(0, 7);
   const monthDays = (month = monthStamp()) => new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0).getDate();
@@ -55,17 +57,16 @@
     next.transactions = Array.isArray(raw.transactions) ? raw.transactions : base.transactions;
     next.budgets = Array.isArray(raw.budgets) ? raw.budgets : base.budgets;
     next.loans = Array.isArray(raw.loans) ? raw.loans : base.loans;
-    next.categories = Array.isArray(raw.categories) && raw.categories.length ? raw.categories : base.categories;
+    next.categories = Array.isArray(raw.categories) ? raw.categories : base.categories;
     next.settings = { ...base.settings, ...(raw.settings || {}) };
+    if (!next.settings.reportMonth) next.settings.reportMonth = monthStamp();
     return next;
   };
 
   const loadState = () => {
     try {
       const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-      const normalized = normalizeState(raw);
-      if (!normalized.settings.reportMonth) normalized.settings.reportMonth = monthStamp();
-      return normalized;
+      return normalizeState(raw);
     } catch {
       return normalizeState({});
     }
@@ -97,7 +98,7 @@
     style.id = 'moneyflow-runtime-style';
     style.textContent = `
       .empty-state { color: var(--muted); padding: 14px 12px; border: 1px dashed var(--line); border-radius: 12px; }
-      .settings-item { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border:1px solid var(--line); border-radius:12px; background: rgba(79,140,255,.04); }
+      .settings-item { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border:1px solid var(--line); border-radius:12px; background: rgba(79,140,255,.05); }
       .settings-item .meta { display:grid; gap:4px; }
       .settings-item strong { font-size: .95rem; }
       .settings-item small { color: var(--muted); }
@@ -151,12 +152,12 @@
 
   const getCategoriesByType = (type) => {
     const state = loadState();
-    return state.categories.filter((cat) => cat.type === type);
+    return (state.categories || []).filter((cat) => cat.type === type);
   };
 
   const renderCategoryOptions = () => {
     const state = loadState();
-    const allCategories = state.categories;
+    const allCategories = state.categories || [];
     const budgetSelect = document.getElementById('budgetCategory');
     if (budgetSelect) {
       const options = allCategories.filter((cat) => cat.type === 'expense').map((cat) => `<option value="${esc(cat.name)}">${esc(cat.name)}</option>`).join('');
@@ -218,7 +219,7 @@
       if (!failedBudgets.length) {
         budgetAlerts.innerHTML = '<div class="empty-state">No alerts for this month.</div>';
       } else {
-        budgetAlerts.innerHTML = failedBudgets.map((row) => `<div class="settings-item"><div class="meta"><strong>${esc(row.category)}</strong><small>${money(row.spent)} spent of ${money(row.budget)}</small></div><span class="pill expense">${Math.round(row.ratio)}%</span></div>`).join('');
+        budgetAlerts.innerHTML = failedBudgets.map((row) => `<div class="settings-item"><div class="meta"><strong>${esc(row.category)}</strong><small>${money(row.spent)} spent of ${money(row.budget)}</small></div></div>`).join('');
       }
     }
   };
@@ -274,11 +275,17 @@
     const state = loadState();
     const tbody = document.getElementById('transactionTable');
     if (!tbody) return;
-    if (!state.transactions.length) {
+    const rows = [...(state.transactions || [])].filter(Boolean);
+    if (!rows.length) {
       tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state">No transactions yet.</div></td></tr>';
       return;
     }
-    tbody.innerHTML = [...state.transactions].sort((a, b) => new Date(b.date) - new Date(a.date)).map((tx) => `
+    rows.sort((a, b) => {
+      const da = a.date ? new Date(a.date + 'T12:00:00').getTime() : 0;
+      const db = b.date ? new Date(b.date + 'T12:00:00').getTime() : 0;
+      return db - da;
+    });
+    tbody.innerHTML = rows.map((tx) => `
       <tr>
         <td>${fmtDate(tx.date)}</td>
         <td><span class="pill ${esc(tx.type === 'expense' ? 'expense' : 'income')}">${esc(tx.type)}</span></td>
@@ -373,7 +380,6 @@
     buildTransactionModal();
     const modal = document.getElementById('transactionModal');
     if (!modal) return;
-    const state = loadState();
     const form = document.getElementById('transactionForm');
     if (!form) return;
     const typeSelect = form.querySelector('select[name="type"]');
@@ -382,11 +388,40 @@
     const noteInput = form.querySelector('input[name="note"]');
     const repSelect = form.querySelector('select[name="loanId"]');
 
-    if (typeSelect) typeSelect.value = preset.type || 'expense'; typeSelect.dispatchEvent(new Event('change'));
+    if (typeSelect) typeSelect.value = preset.type || 'expense';
     if (categorySelect && preset.category) categorySelect.value = preset.category;
     if (amountInput && preset.amount !== undefined) amountInput.value = preset.amount;
     if (noteInput && preset.note) noteInput.value = preset.note;
     if (repSelect && preset.loanId) repSelect.value = preset.loanId;
+
+    const modeButtons = modal.querySelectorAll('.transaction-tab');
+    const selectedMode = preset.type === 'income' && preset.category === 'Loan' ? 'loan' : 'standard';
+    modeButtons.forEach((button) => button.classList.toggle('active', button.dataset.mode === selectedMode));
+    const currentMode = modal.querySelector('.transaction-tab.active')?.dataset.mode || 'standard';
+    const updateTransactionMode = () => {
+      const modalForm = document.getElementById('transactionForm');
+      const amountField = modalForm?.querySelector('.transaction-amount-field');
+      const repaymentFields = modal.querySelector('#repaymentFields');
+      const amountInputField = modalForm?.querySelector('input[name="amount"]');
+      const repaymentInput = modalForm?.querySelector('input[name="repaymentAmount"]');
+      const loanSelect = modalForm?.querySelector('select[name="loanId"]');
+      if (!modalForm) return;
+      const shouldShowRepayment = currentMode === 'repayment';
+      const shouldShowLoan = currentMode === 'loan';
+      amountField?.classList.toggle('hidden', shouldShowRepayment || shouldShowLoan);
+      repaymentFields?.classList.toggle('hidden', !shouldShowRepayment);
+      amountInputField.required = !shouldShowRepayment && !shouldShowLoan;
+      repaymentInput.required = shouldShowRepayment;
+      loanSelect.required = shouldShowRepayment;
+      if (currentMode === 'loan') {
+        modalForm.querySelector('select[name="type"]').value = 'income';
+        modalForm.querySelector('select[name="category"]').value = 'Loan';
+      } else if (currentMode === 'repayment') {
+        modalForm.querySelector('select[name="type"]').value = 'expense';
+        modalForm.querySelector('select[name="category"]').value = 'Loan repayment';
+      }
+    };
+    updateTransactionMode();
 
     const modalDate = form.querySelector('input[name="date"]');
     if (modalDate && !modalDate.value) modalDate.value = new Date().toISOString().slice(0, 10);
@@ -395,7 +430,6 @@
     if (errorBox) errorBox.classList.remove('visible');
     modal.classList.remove('hidden');
     document.body.classList.add('modal-open');
-    setTimeout(() => amountInput?.focus(), 50);
   };
 
   const closeTransactionForm = () => {
@@ -423,6 +457,7 @@
         </div>
         <div class="transaction-tabs">
           <button type="button" class="transaction-tab active" data-mode="standard">Income / Expense</button>
+          <button type="button" class="transaction-tab" data-mode="loan">Loan</button>
           <button type="button" class="transaction-tab" data-mode="repayment">Loan repayment</button>
         </div>
         <div id="transactionFormError" class="form-error" role="alert"></div>
@@ -439,7 +474,7 @@
               <span>Category</span>
               <select name="category"></select>
             </label>
-            <label>
+            <label class="transaction-amount-field">
               <span>Amount</span>
               <input name="amount" type="number" min="1" step="1" required />
             </label>
@@ -473,7 +508,7 @@
     const loanSelect = modal.querySelector('select[name="loanId"]');
     const state = loadState();
     if (loanSelect) {
-      loanSelect.innerHTML = state.loans.map((loan) => `<option value="${esc(loan.id)}">${esc(loan.name)} · ${money(loan.balance)}</option>`).join('') || '<option value="">No loans yet</option>';
+      loanSelect.innerHTML = (state.loans || []).filter((loan) => safeNumber(loan.balance) > 0).map((loan) => `<option value="${esc(loan.id)}">${esc(loan.name)} · ${money(loan.balance)}</option>`).join('') || '<option value="">No loans yet</option>';
     }
 
     modal.querySelector('.modal-close').addEventListener('click', closeTransactionForm);
@@ -485,35 +520,50 @@
     const typeSelect = modal.querySelector('select[name="type"]');
     const categorySelect = modal.querySelector('select[name="category"]');
     const currentBudgetCategories = () => getCategoriesByType(typeSelect.value).map((cat) => `<option value="${esc(cat.name)}">${esc(cat.name)}</option>`).join('');
-    categorySelect.innerHTML = currentBudgetCategories();
+    categorySelect.innerHTML = currentBudgetCategories() || '<option value="">No categories</option>';
     typeSelect.addEventListener('change', () => {
-      categorySelect.innerHTML = currentBudgetCategories();
+      const activeMode = modal.querySelector('.transaction-tab.active')?.dataset.mode || 'standard';
+      if (activeMode !== 'standard') return;
+      categorySelect.innerHTML = currentBudgetCategories() || '<option value="">No categories</option>';
       if (typeSelect.value === 'expense') {
         categorySelect.value = 'Food';
       } else {
-        const incomeCat = getCategoriesByType('income')[0]; if (incomeCat) categorySelect.value = incomeCat.name;
+        const incomeCat = getCategoriesByType('income')[0];
+        if (incomeCat) categorySelect.value = incomeCat.name;
       }
     });
 
     const modeButtons = modal.querySelectorAll('.transaction-tab');
-    const repaymentFields = modal.querySelector('#repaymentFields');
     const setMode = (mode) => {
       modeButtons.forEach((button) => button.classList.toggle('active', button.dataset.mode === mode));
-      const isRepayment = mode === 'repayment';
-      repaymentFields.classList.toggle('hidden', !isRepayment);
       const form = modal.querySelector('#transactionForm');
-      if (form) {
-        const type = form.querySelector('select[name="type"]');
-        const loanAmount = form.querySelector('input[name="repaymentAmount"]');
-        if (isRepayment) {
-          type.value = 'expense';
-          form.querySelector('select[name="category"]').value = 'Loan repayment';
-          loanAmount.required = true;
-          form.querySelector('select[name="loanId"]').required = true;
-        } else {
-          loanAmount.required = false;
-          form.querySelector('select[name="loanId"]').required = false;
-        }
+      if (!form) return;
+      const type = form.querySelector('select[name="type"]');
+      const category = form.querySelector('select[name="category"]');
+      const amountField = form.querySelector('.transaction-amount-field');
+      const repaymentFields = form.parentNode.querySelector('#repaymentFields');
+      const amountInput = form.querySelector('input[name="amount"]');
+      const repaymentInput = form.querySelector('input[name="repaymentAmount"]');
+      const loanSelectField = form.querySelector('select[name="loanId"]');
+
+      const isLoan = mode === 'loan';
+      const isRepayment = mode === 'repayment';
+      amountField?.classList.toggle('hidden', isLoan || isRepayment);
+      repaymentFields?.classList.toggle('hidden', !isRepayment);
+      amountInput.required = !isLoan && !isRepayment;
+      repaymentInput.required = isRepayment;
+      loanSelectField.required = isRepayment;
+
+      if (isLoan) {
+        type.value = 'income';
+        category.value = 'Loan';
+        category.disabled = true;
+      } else if (isRepayment) {
+        type.value = 'expense';
+        category.value = 'Loan repayment';
+        category.disabled = true;
+      } else {
+        category.disabled = false;
       }
     };
     modeButtons.forEach((button) => button.addEventListener('click', () => setMode(button.dataset.mode)));
@@ -533,12 +583,6 @@
         repaymentAmount: Number(form.querySelector('input[name="repaymentAmount"]').value || 0)
       };
 
-      if (!payload.amount || payload.amount <= 0) {
-        errorBox.textContent = 'Enter a valid amount greater than zero.';
-        errorBox.classList.add('visible');
-        return;
-      }
-
       if (selectedMode === 'repayment') {
         if (!payload.loanId) {
           errorBox.textContent = 'Select the loan that is being repaid.';
@@ -553,9 +597,23 @@
         payload.type = 'expense';
         payload.category = 'Loan repayment';
         payload.amount = payload.repaymentAmount;
+      } else if (selectedMode === 'loan') {
+        if (!payload.amount || payload.amount <= 0) {
+          errorBox.textContent = 'Enter a valid loan amount greater than zero.';
+          errorBox.classList.add('visible');
+          return;
+        }
+        payload.type = 'income';
+        payload.category = 'Loan';
+      } else {
+        if (!payload.amount || payload.amount <= 0) {
+          errorBox.textContent = 'Enter a valid amount greater than zero.';
+          errorBox.classList.add('visible');
+          return;
+        }
       }
 
-      const state = loadState();
+      const transactionState = loadState();
       const tx = {
         id: crypto.randomUUID ? crypto.randomUUID() : `tx-${Date.now()}`,
         type: payload.type,
@@ -566,15 +624,15 @@
         loanId: selectedMode === 'repayment' ? payload.loanId : ''
       };
 
-      state.transactions.push(tx);
+      transactionState.transactions.push(tx);
       if (selectedMode === 'repayment') {
-        const targetLoan = state.loans.find((loan) => loan.id === payload.loanId);
+        const targetLoan = transactionState.loans.find((loan) => loan.id === payload.loanId);
         if (targetLoan) {
           targetLoan.paid = safeNumber(targetLoan.paid) + payload.amount;
           targetLoan.balance = Math.max(0, safeNumber(targetLoan.balance) - payload.amount);
         }
       }
-      saveState(state);
+      saveState(transactionState);
       renderAll();
       closeTransactionForm();
       showToast(selectedMode === 'repayment' ? 'Loan repayment saved.' : 'Transaction saved.');
@@ -721,7 +779,9 @@
     if (syncUrlInput) {
       syncUrlInput.value = currentState.settings.syncUrl || '';
       syncUrlInput.addEventListener('input', (event) => {
-        const state = loadState(); state.settings.syncUrl = event.target.value; saveState(state);
+        const state = loadState();
+        state.settings.syncUrl = event.target.value;
+        saveState(state);
       });
     }
 
