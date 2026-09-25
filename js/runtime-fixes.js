@@ -1,6 +1,5 @@
 (() => {
   'use strict';
-
   const STORAGE_KEY = 'moneyflow-v3';
   let syncInFlight = false;
   let syncQueued = false;
@@ -54,7 +53,6 @@
     return result.data || result;
   };
 
-  const byId = (rows) => new Map((Array.isArray(rows) ? rows : []).filter((row) => row?.id).map((row) => [String(row.id), row]));
   const mergeById = (local, remote) => {
     const merged = new Map();
     (Array.isArray(remote) ? remote : []).forEach((row) => row?.id && merged.set(String(row.id), row));
@@ -111,7 +109,6 @@
     if (!url) { setStatus('Sync URL required', 'warning'); if (reason === 'manual') showToast('Add your Google Apps Script URL in Settings.', 'error'); return false; }
     syncInFlight = true;
     try {
-      // Always pull first. Merge by stable IDs/natural category key before pushing.
       const localBefore = readState();
       const remote = await pull(url, reason === 'manual' ? 'manual' : 'silent');
       const merged = mergeData(localBefore, remote);
@@ -128,15 +125,62 @@
     }
   };
 
+  /* UI fixes: keep the modal passive on open, make repayment truly amount-free,
+     and make category deletion work for both legacy and enhanced settings lists. */
+  const addUiFixes = () => {
+    if (document.getElementById('runtime-ui-fixes')) return;
+    const style = document.createElement('style');
+    style.id = 'runtime-ui-fixes';
+    style.textContent = `
+      .table-wrap { width:100%; max-width:100%; overflow-x:auto; overflow-y:hidden; -webkit-overflow-scrolling:touch; }
+      .table-wrap table { min-width:720px; }
+      .transaction-tabs { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+      .transaction-modal .amount-field-hidden { display:none !important; }
+      @media (max-width:560px) { .transaction-tabs { grid-template-columns:1fr; } }
+    `;
+    document.head.appendChild(style);
+  };
+  const updateModalUi = (modal) => {
+    if (!modal) return;
+    const repayment = modal.querySelector('.transaction-tab.active')?.dataset.mode === 'repayment';
+    const amount = modal.querySelector('input[name="amount"]');
+    const label = amount?.closest('label');
+    label?.classList.toggle('amount-field-hidden', repayment);
+    if (repayment) { amount?.removeAttribute('required'); amount?.blur(); }
+  };
+  const repairModal = () => {
+    const modal = document.getElementById('transactionModal');
+    if (!modal) return;
+    updateModalUi(modal);
+    if (!modal.dataset.uiFixBound) {
+      modal.dataset.uiFixBound = 'true';
+      modal.addEventListener('click', () => setTimeout(() => { updateModalUi(modal); document.activeElement?.blur?.(); }, 0), true);
+    }
+    if (!modal.classList.contains('hidden')) setTimeout(() => document.activeElement?.blur?.(), 0);
+  };
+  const repairCategoryDelete = (event) => {
+    const button = event.target.closest('[data-bcm-delete-category], [data-remove-category]');
+    if (!button) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    const key = button.dataset.bcmDeleteCategory || button.dataset.removeCategory;
+    const state = readState();
+    state.categories = (Array.isArray(state.categories) ? state.categories : []).filter((cat) => String(cat.id) !== String(key));
+    saveState(state);
+    window.dispatchEvent(new CustomEvent('moneyflow:state-updated'));
+    showToast('Category removed.');
+  };
+
   const bind = () => {
-    wireSyncUrl();
+    addUiFixes(); wireSyncUrl();
     document.getElementById('syncButton')?.addEventListener('click', () => syncToGoogleSheets('manual'));
-    // Covers static forms and dynamically-created transaction/loan forms.
     document.addEventListener('submit', (event) => {
       if (!event.target.closest('form')) return;
       const url = getSyncUrl();
       if (url) setTimeout(() => syncToGoogleSheets('save'), 250);
     }, true);
+    document.addEventListener('click', repairCategoryDelete, true);
+    const observer = new MutationObserver(repairModal);
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
     window.syncToGoogleSheets = syncToGoogleSheets;
     window.pullFromGoogleSheets = () => { const url = getSyncUrl(); return url ? pull(url, 'manual') : false; };
     const url = getSyncUrl(); setStatus(url ? 'Ready to sync' : 'Sync URL required', url ? 'idle' : 'warning');
